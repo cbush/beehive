@@ -1,0 +1,12 @@
+.DS_Store
+xcuserdata
+*.xcworkspace
+DerivedData
+*.a
+*.o
+*.out
+*.dylib
+build/
+doc/html
+doc/latex
+
