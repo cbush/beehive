@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.4)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/")
+
 # This CMakeLists adapted from nlohmann's json library.
 
 project(beehive VERSION 0.0.1 LANGUAGES CXX)

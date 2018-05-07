@@ -1,5 +1,7 @@
 set(BEEHIVE_TEST_BINARY_DIR ${CMAKE_BINARY_DIR}/test)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake/")
+
 # Source: https://github.com/google/googletest/tree/master/googletest#incorporating-into-an-existing-cmake-project
 
 # Download and unpack googletest at configure time
@@ -54,3 +56,12 @@ target_link_libraries(beehive_test
 
 enable_testing()
 add_test(beehive_test beehive_test)
+
+include(CodeCoverage)
+append_coverage_compiler_flags(--coverage)
+setup_target_for_coverage(
+  NAME beehive_test_coverage
+  EXECUTABLE beehive_test
+  DEPENDENCIES beehive_test
+)
+
