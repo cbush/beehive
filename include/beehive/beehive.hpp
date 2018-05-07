@@ -123,8 +123,30 @@ Status succeeder(Node<C> const &child, C &context)
     return Status::SUCCESS;
 }
 
+
+template<typename ReturnType, typename ContextType>
+using BasicLeaf = std::function<ReturnType(ContextType &context)>; //!< Leaf nodes are the `process()` function taking the mutable context and must return a status.
+
+template<typename C>
+using Leaf = BasicLeaf<Status, C>; //!< A Leaf function takes a Context & and returns a Status.
+
+template<typename C>
+using BoolLeaf = BasicLeaf<bool, C>; //!< A Leaf function returning bool returns SUCCESS on true and FAILURE on false. It is not possible to return RUNNING from such a function.
+
+template<typename C>
+using VoidLeaf = BasicLeaf<void, C>; //!< A Leaf function returning anything other than bool or Status can be added using #beehive::BuilderBase::void_leaf. The return value is ignored and SUCCESS is returned.
+
 /*!
- \brief The tree class which passes the ContextType around. See #beehive::Builder for making one.
+ \brief A leaf that always succeeds. Not very useful...
+*/
+template<typename C>
+Status noop(C &)
+{
+    return Status::SUCCESS;
+}
+
+/*!
+ \brief The behavior tree class which passes the ContextType around. See #beehive::Builder for making one.
 */
 template<typename ContextType>
 class Tree
@@ -132,6 +154,11 @@ class Tree
 public:
     using Context = ContextType;
 
+    /*!
+     \brief Default constructor. Running process() while the tree is empty is a no-op.
+    */
+    Tree();
+    
     /*!
      \brief Constructs a tree with the given node root.
         See #beehive::Builder.
@@ -163,6 +190,11 @@ Tree<C>::Tree(Node<Context> root)
 {}
 
 template<typename C>
+Tree<C>::Tree()
+    : _root(make_leaf(Leaf<C>(&noop<C>)))
+{}
+
+template<typename C>
 Status Tree<C>::process(Context &context)
 {
     return _root.process(context);
@@ -179,18 +211,6 @@ Node<C> &&Tree<C>::root() &&
 {
     return std::move(_root);
 }
-
-template<typename ReturnType, typename ContextType>
-using BasicLeaf = std::function<ReturnType(ContextType &context)>; //!< Leaf nodes are the `process()` function taking the mutable context and must return a status.
-
-template<typename C>
-using Leaf = BasicLeaf<Status, C>; //!< A Leaf function takes a Context & and returns a Status.
-
-template<typename C>
-using BoolLeaf = BasicLeaf<bool, C>; //!< A Leaf function returning bool returns SUCCESS on true and FAILURE on false. It is not possible to return RUNNING from such a function.
-
-template<typename C>
-using VoidLeaf = BasicLeaf<void, C>; //!< A Leaf function returning anything can be added using #beehive::BuilderBase::void_leaf. The return value is ignored and SUCCESS is returned.
 
 /// @cond
 template<typename C>
@@ -241,6 +261,7 @@ public:
     */
     BuilderBase decorator(Decorator<C> decorator);
     
+    // Note: "no known conversion" warnings here could indicate that you forgot to return something from your lambda.
     /*!
      \brief Adds the given leaf to the tree. Leaves have no children.
     */
@@ -322,7 +343,6 @@ private:
     Type _type{};
     /// @endcond
 };
-
 
 /*!
  \brief Defines the tree structure and instantiates it.
