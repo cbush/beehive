@@ -1,6 +1,7 @@
 #include <beehive/beehive.hpp>
 
 #include <gtest/gtest.h>
+#include <array>
 
 struct ZombieState
 {
@@ -23,7 +24,7 @@ struct EnemiesAroundChecker
     bool _enemies_around{false};
 };
 
-TEST(BeehiveTest, BuilderTest)
+TEST(BeehiveTest, ExampleTest)
 {
     using namespace beehive;
     auto tree = Builder<ZombieState>{}
@@ -39,4 +40,221 @@ TEST(BeehiveTest, BuilderTest)
             .void_leaf(&ZombieState::eat_food) // Void member function
         .end()
         .build();
+}
+
+TEST(BeehiveTest, SequenceTest)
+{
+    using namespace beehive;
+    using VisitedArray = std::array<bool, 3>;
+
+    auto tree = Builder<VisitedArray>{}
+        .sequence()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return false;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return true;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return true;
+            })
+        .end()
+        .build();
+
+    VisitedArray visited{};
+    auto status = tree.process(visited);
+    EXPECT_EQ(status, Status::FAILURE);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_FALSE(visited[1]);
+    EXPECT_FALSE(visited[2]);
+
+    tree = Builder<VisitedArray>{}
+        .sequence()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return true;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return Status::RUNNING;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return true;
+            })
+        .end()
+        .build();
+
+    visited = {};
+    status = tree.process(visited);
+    EXPECT_EQ(status, Status::RUNNING);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_TRUE(visited[1]);
+    EXPECT_FALSE(visited[2]);
+    
+    tree = Builder<VisitedArray>{}
+        .sequence()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return true;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return true;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return true;
+            })
+        .end()
+        .build();
+
+    visited = {};
+    status = tree.process(visited);
+    EXPECT_EQ(status, Status::SUCCESS);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_TRUE(visited[1]);
+    EXPECT_TRUE(visited[2]);
+}
+
+TEST(BeehiveTest, SelectorTest)
+{
+    using namespace beehive;
+    using VisitedArray = std::array<bool, 3>;
+
+    auto tree = Builder<VisitedArray>{}
+        .selector()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return false;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return true;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return true;
+            })
+        .end()
+        .build();
+
+    VisitedArray visited{};
+    auto status = tree.process(visited);
+    EXPECT_EQ(status, Status::SUCCESS);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_TRUE(visited[1]);
+    EXPECT_FALSE(visited[2]);
+
+    tree = Builder<VisitedArray>{}
+        .selector()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return false;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return Status::RUNNING;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return true;
+            })
+        .end()
+        .build();
+
+    visited = {};
+    status = tree.process(visited);
+    EXPECT_EQ(status, Status::RUNNING);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_TRUE(visited[1]);
+    EXPECT_FALSE(visited[2]);
+    
+    tree = Builder<VisitedArray>{}
+        .selector()
+            .leaf([](VisitedArray &visited) {
+                visited[0] = true;
+                return false;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[1] = true;
+                return false;
+            })
+            .leaf([](VisitedArray &visited) {
+                visited[2] = true;
+                return false;
+            })
+        .end()
+        .build();
+
+    visited = {};
+    status = tree.process(visited);
+    EXPECT_EQ(status, Status::FAILURE);
+    EXPECT_TRUE(visited[0]);
+    EXPECT_TRUE(visited[1]);
+    EXPECT_TRUE(visited[2]);
+}
+
+
+TEST(BeehiveTest, InverterTest)
+{
+    using namespace beehive;
+
+    auto tree = Builder<const int>{}
+        .inverter()
+            .leaf([](int) {
+                return Status::RUNNING;
+            })
+        .end()
+        .build();
+    
+    auto status = tree.process(1);
+    EXPECT_EQ(status, Status::RUNNING);
+
+    tree = Builder<const int>{}
+        .inverter()
+            .leaf([](int) {
+                return false;
+            })
+        .end()
+        .build();
+    
+    status = tree.process(1);
+    EXPECT_EQ(status, Status::SUCCESS);
+
+    tree = Builder<const int>{}
+        .inverter()
+            .leaf([](int) {
+                return true;
+            })
+        .end()
+        .build();
+    
+    status = tree.process(1);
+    EXPECT_EQ(status, Status::FAILURE);
+}
+
+TEST(BeehiveTest, SucceederTest)
+{
+    using namespace beehive;
+
+    auto tree = Builder<const int>{}
+        .sequence()
+            .succeeder()
+                .leaf([](int) { return true; })
+            .end()
+            .succeeder()
+                .leaf([](int) { return Status::RUNNING; })
+            .end()
+            .succeeder()
+                .leaf([](int) { return false; })
+            .end()
+        .end()
+        .build();
+    
+    auto status = tree.process(1);
+    EXPECT_EQ(status, Status::SUCCESS);
 }

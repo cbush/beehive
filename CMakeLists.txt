@@ -6,7 +6,7 @@ project(beehive VERSION 0.0.1 LANGUAGES CXX)
 
 include(ExternalProject)
 
-option(BEEHIVE_BuildTests "Build the unit tests when BUILD_TESTING is enabled." ON)
+option(BEEHIVE_BuildTests "Build the unit tests when BUILD_TESTING is enabled." OFF)
 
 set(BEEHIVE_TARGET_NAME ${PROJECT_NAME})
 set(BEEHIVE_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/beehive)

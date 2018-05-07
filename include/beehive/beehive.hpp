@@ -6,6 +6,10 @@
 #include <type_traits>
 #include <vector>
 
+/*!
+ \file beehive.hpp
+*/
+
 namespace beehive
 {
 
@@ -20,7 +24,7 @@ enum class Status
 };
 
 /*!
- \brief A handle on a process function. This should not be built directly, see #Builder.
+ \brief A handle on a process function. This should not be built directly, see #beehive::Builder.
 */
 template<typename C>
 struct Node
@@ -120,7 +124,7 @@ Status succeeder(Node<C> const &child, C &context)
 }
 
 /*!
- \brief The tree class which passes the ContextType around. See #Builder for making one.
+ \brief The tree class which passes the ContextType around. See #beehive::Builder for making one.
 */
 template<typename ContextType>
 class Tree
@@ -130,7 +134,7 @@ public:
 
     /*!
      \brief Constructs a tree with the given node root.
-        See #Builder.
+        See #beehive::Builder.
     */
     Tree(Node<Context> root);
 
@@ -176,22 +180,19 @@ Node<C> &&Tree<C>::root() &&
     return std::move(_root);
 }
 
-/*
- \brief Leaf nodes are the `process()` function taking the mutable context
-    and must return a status.
-*/
 template<typename ReturnType, typename ContextType>
-using BasicLeaf = std::function<ReturnType(ContextType &context)>;
+using BasicLeaf = std::function<ReturnType(ContextType &context)>; //!< Leaf nodes are the `process()` function taking the mutable context and must return a status.
 
 template<typename C>
-using Leaf = BasicLeaf<Status, C>;
+using Leaf = BasicLeaf<Status, C>; //!< A Leaf function takes a Context & and returns a Status.
 
 template<typename C>
-using VoidLeaf = BasicLeaf<void, C>;
+using BoolLeaf = BasicLeaf<bool, C>; //!< A Leaf function returning bool returns SUCCESS on true and FAILURE on false. It is not possible to return RUNNING from such a function.
 
 template<typename C>
-using BoolLeaf = BasicLeaf<bool, C>;
+using VoidLeaf = BasicLeaf<void, C>; //!< A Leaf function returning anything can be added using #beehive::BuilderBase::void_leaf. The return value is ignored and SUCCESS is returned.
 
+/// @cond
 template<typename C>
 auto make_branch(Decorator<C> f) -> typename Node<C>::ProcessFunction;
 
@@ -206,33 +207,42 @@ auto make_leaf(VoidLeaf<C> f) -> typename Node<C>::ProcessFunction;
 
 template<typename C>
 auto make_leaf(BoolLeaf<C> f) -> typename Node<C>::ProcessFunction;
+/// @endcond
 
+template<typename C>
+class Builder;
+
+/*!
+ \brief A helper for building trees which can be instantiated as #beehive::Builder.
+*/
 template<typename C>
 class BuilderBase
 {
 public:
+    /// @cond
     enum class Type
     {
         COMPOSITE,
         DECORATOR,
     };
+    /// @endcond
 
     /*!
-     \brief Adds the given composite to the tree. Composites have one or more children. See #Composite.
+     \brief Adds the given composite to the tree. Composites have one or more children.
 
      \note The composite builder must call end() to signify end of child list.
     */
     BuilderBase composite(Composite<C> composite);
 
     /*!
-     \brief Adds the given decorator to the tree. Decorators have exactly one child. See #Decorator.
+     \brief Adds the given decorator to the tree. Decorators have exactly one child.
     
      \note The decorator builder must call end() to signify the end of the child list.
     */
     BuilderBase decorator(Decorator<C> decorator);
     
     /*!
-     \brief Adds the given leaf to the tree. Leaves have no children. See #Leaf.
+     \brief Adds the given leaf to the tree. Leaves have no children.
     */
     BuilderBase &leaf(Leaf<C> leaf);
     
@@ -243,7 +253,7 @@ public:
     BuilderBase &leaf(BoolLeaf<C> leaf);
 
     /*!
-     \brief Convenience wrapper for a void function. This always returns Status::SUCCESS.
+     \brief Convenience wrapper for a void function, or really a function returning any type other than bool or Status. This always returns Status::SUCCESS.
     */
     BuilderBase &void_leaf(VoidLeaf<C> leaf);
 
@@ -292,6 +302,7 @@ public:
     BuilderBase succeeder();
 
 protected:
+    /// @cond
     BuilderBase(BuilderBase &parent, Node<C> *node, Type type)
         : _node(node)
         , _parent(parent)
@@ -309,34 +320,40 @@ private:
 
     BuilderBase &_parent;
     Type _type{};
+    /// @endcond
 };
 
 
-/*
+/*!
  \brief Defines the tree structure and instantiates it.
  
     This Builder pattern is inspired by arvidsson's implementation, BrainTree.
- \sa #BuilderBase
+ \sa #beehive::BuilderBase
 */
 template<typename C>
 class Builder
     : public BuilderBase<C>
 {
 public:
+    /*!
+     \brief The context type.
+    */
     using Context = C;
-    using Base = BuilderBase<C>;
 
+    /*!
+     \brief Begins construction of a tree.
+    */
     Builder()
-        : Base(*this, nullptr, Base::Type::DECORATOR)
+        : BuilderBase<C>(*this, nullptr, BuilderBase<C>::Type::DECORATOR)
         , _root(make_branch(Decorator<C>(&forwarder<C>)))
     {
         this->_node = &_root;
     }
-
-    Builder(Builder const &) = delete;
-    Builder(Builder &&) = default;
-    Builder &operator=(Builder const &) = delete;
-    Builder &operator=(Builder &&) = default;
+    
+    Builder(Builder const &) = delete; //!< Deleted copy constructor.
+    Builder(Builder &&) = default; //!< Move constructor.
+    Builder &operator=(Builder const &) = delete; //!< Deleted copy assignment operator.
+    Builder &operator=(Builder &&) = default; //!< Move assignment operator.
 
     virtual Tree<C> build() const & override
     {
@@ -354,6 +371,7 @@ private:
     Node<C> _root;
 };
 
+/// @cond
 template<typename C>
 auto make_branch(Decorator<C> f) -> typename Node<C>::ProcessFunction
 {
@@ -497,6 +515,7 @@ BH_IMPLEMENT_SHORTHAND(Decorator, inverter);
 BH_IMPLEMENT_SHORTHAND(Decorator, succeeder);
 
 #undef BH_IMPLEMENT_SHORTHAND
+/// @endcond
 
 } // namespace beehive
 
