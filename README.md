@@ -36,6 +36,9 @@ Nodes in the tree are naïvely implemented with vectors of their own child nodes
 
 Nodes do not have a reset() function, so the tree needs to be rebuilt in order to reinitialize any stateful nodes. This can be mitigated with the builder's `.tree()` function, which allows reuse of builder code for sections of the tree. It would be possible to add support for an optional reset() function in the future, but I might sooner add more functionality around replacing subtrees. It remains to be seen after more real-world use.
 
+### Re: static (compile-time) builder structure validation
+
+Something I'd like to look into is validating the builder (see below) at compile-time.
 
 # Get started!
 
@@ -84,6 +87,8 @@ That tree could be defined as follows:
             .void_leaf(&ZombieState::eat_food)
         .end()
         .build();
+
+This builder pattern is inspired by arvidsson's [BrainTree](https://github.com/arvidsson/BrainTree).
 
 ### Building composites and decorators (branch nodes)
 
