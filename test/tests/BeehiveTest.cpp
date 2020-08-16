@@ -42,6 +42,43 @@ TEST(BeehiveTest, ExampleTest)
         .build();
 }
 
+TEST(BeehiveTest, ResumePendingTest)
+{
+    using namespace beehive;
+
+    using VisitCountArray = std::array<int, 3>;
+
+    auto tree = Builder<VisitCountArray>{}
+        .sequence()
+            .leaf([](VisitCountArray &visited) {
+                // This never returns RUNNING, so it should never be visited twice.
+                return ++visited[0] > 1 ? Status::FAILURE : Status::SUCCESS;
+            })
+            .leaf([](VisitCountArray &visited) {
+                // This should be visited twice after returning RUNNING.
+                return ++visited[1] > 1 ? Status::SUCCESS : Status::RUNNING;
+            })
+            .leaf([](VisitCountArray &visited) {
+                // This should only be visited once.
+                ++visited[2];
+                return true;
+            })
+        .end()
+        .build();
+
+    VisitCountArray visited{};
+    auto status = tree.process(visited);
+    EXPECT_EQ(status, Status::RUNNING);
+    EXPECT_EQ(visited[0], 1);
+    EXPECT_EQ(visited[1], 1);
+    EXPECT_EQ(visited[2], 0);
+    status = tree.process(visited);
+    EXPECT_EQ(status, Status::SUCCESS);
+    EXPECT_EQ(visited[0], 1);
+    EXPECT_EQ(visited[1], 2);
+    EXPECT_EQ(visited[2], 1);
+}
+
 TEST(BeehiveTest, SequenceTest)
 {
     using namespace beehive;
