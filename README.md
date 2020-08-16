@@ -2,15 +2,17 @@
 
 A flexible, modern C++ implementation of behavior trees [as described by Chris Simpson](https://www.gamasutra.com/blogs/ChrisSimpson/20140717/221339/).
 
-Behavior trees are often applied to writing AI systems in video games. See [the article on Wikipedia](https://en.wikipedia.org/wiki/Behavior_tree_(artificial_intelligence%2C_robotics_and_control)) for another overview.
+Behavior trees are often applied to writing AI systems in video games. See [the article on Wikipedia](<https://en.wikipedia.org/wiki/Behavior_tree_(artificial_intelligence%2C_robotics_and_control)>) for another overview.
 
 # Overview
 
 - Header-only, C++14 template library with no other dependencies.
-- Primitive composites and decorators are provided -- e.g. sequence, selector, inverter, etc. -- but you can always add your own!
-- Nodes do not have to subclass from anything -- they are just functions.
-- Leaf nodes are just process functions with the signature `beehive::Status operator()(Context &context)`. In other words, nodes can be a functor, static function, lambda, etc.
-- Dynamic allocation can be kept to a minimum. See Future vision below.
+- Primitive composites and decorators are provided: sequence, selector, inverter, and so on. But you can always add your own!
+- Custom behaviors do not have to subclass from anything -- they are just functions.
+- Leaf nodes are just process functions with the signature `beehive::Status operator()(Context &context)`. In other words, nodes can be a functor, static function, lambda, or even a member function of the `Context` object that you define.
+- Trees are composable.
+- You can reuse the same tree instance for all entities, so complex trees do not need to be copied around. You can resume a RUNNING node by reusing the same `TreeState` object.
+- Dynamic allocation is kept to a minimum. Nodes are kept in a contiguous array. See Future vision below.
 
 ## License
 
@@ -24,21 +26,14 @@ This project uses CMake. If you are also using CMake, you can `add_subdirectory(
 
 In your project, `#include <beehive/beehive.hpp>`.
 
-## Future vision
+## Run Tests
 
-### Re: memory
+To generate a project with unit tests enabled, pass `-DBEEHIVE_BuildTests=ON` to CMake:
 
-Currently, beehive is implemented with std::vector and std::function. The latter on most implementations will have a small function optimization allowing storage of lambdas with small captures and other functors without dynamically allocating space for them. If there's interest, I could wrap the nodes in a custom type-erasing function wrapper that has more inline space for functors, which would further reduce allocation frequency.
-
-Nodes in the tree are naïvely implemented with vectors of their own child nodes, which also leads to unnecessary allocations (still a step up from forcing every node to be a shared_ptr, but anyway...). I'd like to update this so that the tree holds all of the memory up-front.
-
-### Re: resetting stateful nodes/subtrees
-
-Nodes do not have a reset() function, so the tree needs to be rebuilt in order to reinitialize any stateful nodes. This can be mitigated with the builder's `.tree()` function, which allows reuse of builder code for sections of the tree. It would be possible to add support for an optional reset() function in the future, but I might sooner add more functionality around replacing subtrees. It remains to be seen after more real-world use.
-
-### Re: static (compile-time) builder structure validation
-
-Something I'd like to look into is validating the builder (see below) at compile-time.
+```
+mkdir build && cd build
+cmake .. -G Xcode -DBEEHIVE_BuildTests=ON
+```
 
 # Get started!
 
@@ -46,10 +41,11 @@ If you have not read Chris Simpson's [blog post on the subject](https://www.gama
 
 ## Use the Builder
 
-Trees do not need to be built directly. Instead, use the Builder class to define the tree structure:
+To build a tree, use the Builder class to define the tree structure:
 
     #include <beehive/beehive.hpp>
 
+    // Some context object relevant to your use case that you define
     struct Context {};
 
     int main() {
@@ -90,26 +86,65 @@ That tree could be defined as follows:
 
 This builder pattern is inspired by arvidsson's [BrainTree](https://github.com/arvidsson/BrainTree).
 
-### Building composites and decorators (branch nodes)
+As you can see, the pattern is to use `beehive::Builder<YourContext>{}` to start a build, then the chained list of primitive calls, then `.build()` to finalize the tree.
 
-The above example uses many of the primitives available of Beehive. Note that the convenience functions `.sequence()` and `.inverter()` were used: these are shorthands for `.composite(&beehive::sequence<ZombieState>)` and `.decorator(&beehive::inverter<ZombieState>)`, respectively. You can pass any callable -- including lambdas, free functions, functors, static member functions and member functions -- to `.composite()` that matches this callable signature:
+See a complete list of primitives at the bottom of this README.
 
-    beehive::Status operator()(std::vector<beehive::Node> const &child_nodes, Context &context);
-    
-This function is the process function called when the Tree is on this node. In this, you can iterate through the provided child nodes (calling `process()` on them) in whatever order you wish, then return a `beehive::Status`.
+### Use `.end()` when done with composites and decorators
+
+Composites and decorators require a corresponding call to `.end()` on the builder, kind of like closing a tag in XML. Leaf nodes do not need an `.end()` because they can't have any children.
+
+(Technically decorators wouldn't need an `.end()` either, because they can only have exactly one child, but when laying it out with the appropriate indentation, it looks weird without the `end()`.) It helps to format the calls so that the builder code's indentation matches the nesting level of the calls. But don't worry! However you want to format it, if you make a mistake in the builder, Beehive will assert when you try to run your code. Ouch! (Thinking about making this compile-time assertion -- see Future Vision below).
+
+The tree's root node is essentially a decorator that just returns the result of its child `process()` function. Therefore the root can not have more than one child. Use `.build()` to finalize the tree.
+
+### Add custom composites and decorators (branch nodes)
+
+The above example uses many of the primitives available of Beehive. Note that the convenience functions `.sequence()` and `.inverter()` were used: these are shorthands for `.composite(&beehive::sequence<ZombieState>)` and `.decorator(&beehive::inverter<ZombieState>)`, respectively. You can pass any callable -- including lambdas, free functions, functors, static member functions and context object member functions -- to `.composite()` that matches this callable signature:
+
+    beehive::Status operator()(Context &context, beehive::Generator<Context> next_child, beehive::TreeState &tree_state);
+
+This function is the process function called when the Tree is on this node. In this function, iterate through the child nodes by calling the `next_child()` generator.
+
+For example, here's an implementation of the `sequence` composite:
+
+```cpp
+Status sequence(
+    MyContext &context,
+    Generator<MyContext> const &next_child,
+    TreeState &state
+) {
+    while (auto const *child = next_child()) // use the generator to iterate
+    {
+        auto status = child->process(context, state); // always pass the provided tree state
+        if (status != Status::SUCCESS)
+        {
+            return status; // if status did not succeed, return the status
+        }
+    }
+    return Status::SUCCESS; // if all children succeeded, this succeeded
+}
+```
 
 Similarly, you can pass any callable of the following signature to `.decorator()`:
 
-    beehive::Status operator()(beehive::Node const &child, Context &context);
+    beehive::Status operator()(Context &context, beehive::Node const &child, beehive::TreeState &state);
 
+For example, here's an implementation of the `inverter` decorator:
 
-### Use `.end()` when done with branch nodes
+```cpp
+Status inverter(MyContext &context, Node<MyContext> const &child, TreeState &state)
+{
+    const auto status = child.process(context, state); // process the child
+    if (status == Status::RUNNING)
+    {
+        return status; // return RUNNING if that was the status
+    }
+    return status == Status::FAILURE ? Status::SUCCESS : Status::FAILURE; // otherwise, return the opposite
+}
+```
 
-The branch nodes (i.e. composites and decorators) require a corresponding call to `.end()` on the builder, kind of like closing a tag in XML. Leaf nodes do not need an `.end()` because they can't have any children.
-
-(Technically decorators wouldn't need an `.end()` either, because they can only have exactly one child, but when laying it out with the appropriate indentation, it looks weird.) It helps to format the calls so that the builder code's indentation matches the nesting level of the calls. But don't worry! However you want to format it, if you make a mistake in the builder, Beehive will assert when you try to run your code. (TODO: Use exceptions?)
-
-The tree's root node is essentially a decorator that just returns the result of its child `process()` function. Therefore the root can not have more than one child. Use `.build()` to finalize the tree.
+You may not need to implement your own composites and decorators. If you come up with some generally useful ones, please feel free to open a pull request or issue to let me know about them!
 
 ### Building leaf nodes
 
@@ -140,6 +175,19 @@ In the above example, various approaches to adding the function are demonstrated
 
 Additionally, you could use a static member function pointer, a free function pointer or a lambda with captures.
 
+### Attaching another tree
+
+Suppose you already have a tree built for the given Context type. You can reuse the builder code by using the builder's `.tree()` function to attach the entire tree as a child.
+
+    // given `tree` above
+    auto tree2 = Builder<ZombieState>{}
+        .sequence()
+            .tree(tree)
+            // ... etc.
+        .end()
+        .build();
+
+## Using the tree
 
 ### The Context object
 
@@ -153,36 +201,59 @@ The above example used a `ZombieState` context similar to this:
     {
         bool is_hungry{true};
         void eat_food();
-        
+
         beehive::Status has_food() const
         {
             return _has_food? beehive::Status::SUCCESS : beehive::Status::FAILURE;
         }
-        
+
         bool _has_food{true};
     };
 
+### The tree state
 
-### Attaching another tree
+In order to resume RUNNING nodes on subsequent `process()` calls, you need to pass the same `TreeState` object to `tree.process()`.
 
-Suppose you already have a tree built for the given Context type. You can reuse the builder code by using the builder's `.tree()` function to attach the entire tree as a child.
+Obtain a `TreeState` instance for the tree with `tree.make_state()`:
 
-    // given `tree` above
-    auto tree2 = Builder<ZombieState>{}
-        .sequence()
-            .tree(tree)
-            // ... etc.
-        .end()
-        .build();
+```cpp
+auto state = tree.make_state();
+```
 
+Do not modify the state object directly.
 
-### Process
+If you want to "reset" the state, you can always just make a new state.
+
+Rather than copying entire trees around to all entities who might want to use them, the externalized `TreeState` object allows many entities to share the same potentially huge tree while only needing to hang on to a tiny state object.
+
+The `TreeState` passed to `tree.process()` **must** have originated from a call to the same tree's `tree.make_state()`. You cannot mix and match state objects.
+
+### Call process
 
 Once the tree is built, you can run `process()` on it with a Context instance. When and how you decide to recreate the instance is up to you.
 
-    ZombieState state = make_state(); // initialized state
-    tree.process(state);
+    auto tree_state = tree.make_state(); // get tree state
+    ZombieState zombie_state = make_state(); // initialized state
+    tree.process(tree_state, zombie_state);
 
+### Interrupting a running task
+
+One common question is how to deal with interruptions without overcomplicating the tree. Suppose your character has to check that nobody is around before deciding it's safe to eat. Once the character starts the process of eating, that `eat` node returns `RUNNING`. As long as you pass the same `TreeState` instance to subsequent `tree.process()` calls, that character will continue eating until done. What happens if the situation changes, and it's no longer safe to eat? Without interruptions, the character will be stuck eating in an unsafe situation!
+
+One solution as suggested again from Chris Simpson in the comments section of the original article is to have two (or more) trees: one for "high priority" checks and the other for the regular thing like eating. The high priority tree would probably have faster checks and fewer or shorter `RUNNING` states.
+If the high priority tree succeeds, the normal tree runs. Otherwise, an issue has come up and the high priority tree needs to deal with it. Once the situation is resolved, the high priority tree will succeed again and allow the character to resume whatever they were doing.
+
+# Future vision
+
+### Re: memory
+
+Currently, beehive is implemented with std::vector and std::function. The latter on most implementations will have a small function optimization allowing storage of lambdas with small captures and other functors without dynamically allocating space for them. If there's interest, I could wrap the nodes in a custom type-erasing function wrapper that has more inline space for functors, which would further reduce allocation frequency.
+
+The tree uses std::vector to allocate space for all nodes up-front. Nodes are stored contiguously depth-first. You can pass your own allocator to the Builder.
+
+### Re: static (compile-time) builder structure validation
+
+Something I'd like to look into is validating the builder at compile-time.
 
 # Primitives reference
 
@@ -197,7 +268,7 @@ Composites have at least 1 child and are used to filter their child's process re
 Processes child nodes in order. Logical AND of the child nodes.
 
 - Returns SUCCESS if all children returned success.
-- Stops processing and returns RUNNING if a child returned RUNNING.
+- Stops processing and returns RUNNING if a child returned RUNNING. If you pass in the same `TreeState` instance to the next `tree.process()` call, the tree will resume at this node.
 - Stops processing and returns FAILURE if a child returned FAILURE.
 
 ### `selector<C>`
@@ -205,7 +276,7 @@ Processes child nodes in order. Logical AND of the child nodes.
 Processes child nodes in order. Logical OR of the child nodes.
 
 - Stops processing and returns SUCCESS if any child returned SUCCESS.
-- Stops processing and returns RUNNING if any child returned RUNNING.
+- Stops processing and returns RUNNING if any child returned RUNNING. If you pass in the same `TreeState` instance to the next `tree.process()` call, the tree will resume at this node.
 - Returns FAILURE if no child returned SUCCESS or RUNNING.
 
 ## Decorators
@@ -215,7 +286,7 @@ Decorators are composites with exactly 1 child.
 ### `inverter<C>`
 
 - Returns SUCCESS if the child returned FAILED.
-- Returns PENDING if the child returned PENDING.
+- Returns RUNNING if the child returned RUNNING.
 - Returns FAILED if the child returned SUCCESS.
 
 ### `succeeder<C>`
@@ -225,4 +296,3 @@ Decorators are composites with exactly 1 child.
 ## Leafs
 
 Nothing here.
-
